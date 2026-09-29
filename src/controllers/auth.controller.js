@@ -1,10 +1,14 @@
-import { getAuth } from "firebase-admin/auth";
 import crypto from "crypto";
 import User from "../models/user.model.js";
-import { firebaseApp } from "../config/firebase.js";
+import { getAuth } from "firebase-admin/auth";
+import firebaseApp from "../config/firebase.js";
 import redis from "../config/redis.js";
 
 const SESSION_TTL = 7 * 24 * 60 * 60;
+
+// ======================================================
+// GOOGLE / FIREBASE LOGIN
+// ======================================================
 
 export const googleAuth = async (req, res) => {
   try {
@@ -17,8 +21,8 @@ export const googleAuth = async (req, res) => {
       });
     }
 
-    const decodedToken =
-      await getAuth(firebaseApp).verifyIdToken(token);
+    // Verify Firebase ID token
+    const decodedToken = await getAuth(firebaseApp).verifyIdToken(token);
 
     const {
       uid,
@@ -26,20 +30,31 @@ export const googleAuth = async (req, res) => {
       name,
     } = decodedToken;
 
+    if (!uid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Firebase token",
+      });
+    }
+
+    // Find existing user
     let user = await User.findOne({
       firebaseUid: uid,
     });
 
+    // Create new user
     if (!user) {
       user = await User.create({
         firebaseUid: uid,
-        username: name || email?.split("@")[0],
-        email,
+        username: name || email?.split("@")[0] || "User",
+        email: email || "",
       });
     }
 
+    // Create session ID
     const sessionId = crypto.randomUUID();
 
+    // Store session data in Redis
     const sessionData = {
       userId: user._id.toString(),
       username: user.username,
@@ -54,10 +69,11 @@ export const googleAuth = async (req, res) => {
       SESSION_TTL
     );
 
+    // Store session cookie
     res.cookie("session", sessionId, {
       httpOnly: true,
 
-      // IMPORTANT for localhost development
+      // Local development
       secure: false,
       sameSite: "lax",
 
@@ -80,14 +96,20 @@ export const googleAuth = async (req, res) => {
   }
 };
 
+// ======================================================
+// LOGOUT
+// ======================================================
+
 export const logout = async (req, res) => {
   try {
     const sessionId = req.cookies?.session;
 
+    // Remove Redis session
     if (sessionId) {
       await redis.del(`session:${sessionId}`);
     }
 
+    // Remove browser cookie
     res.clearCookie("session", {
       httpOnly: true,
       secure: false,
@@ -109,9 +131,20 @@ export const logout = async (req, res) => {
   }
 };
 
+// ======================================================
+// USE INTERVIEW COINS
+// ======================================================
+
 export const useCoin = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated user ID not found",
+      });
+    }
 
     const {
       coins,
@@ -120,7 +153,7 @@ export const useCoin = async (req, res) => {
 
     const coinAmount = Number(coins);
 
-    if (!coinAmount || coinAmount <= 0) {
+    if (!Number.isFinite(coinAmount) || coinAmount <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid coin amount",
@@ -144,11 +177,12 @@ export const useCoin = async (req, res) => {
       });
     }
 
+    // Deduct coins
     user.interviewCoin -= coinAmount;
 
     await user.save();
 
-    // Update current Redis session
+    // Update Redis session
     const sessionId = req.cookies?.session;
 
     if (sessionId) {
@@ -182,12 +216,24 @@ export const useCoin = async (req, res) => {
   }
 };
 
+// ======================================================
+// ADD INTERVIEW COINS
+// ======================================================
+
 export const addCoin = async (req, res) => {
   try {
-    const userId = req.user.userId;
-    const coinAmount = Number(req.body.coins);
+    const userId = req.user?.userId;
 
-    if (!coinAmount || coinAmount <= 0) {
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated user ID not found",
+      });
+    }
+
+    const coinAmount = Number(req.body?.coins);
+
+    if (!Number.isFinite(coinAmount) || coinAmount <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid coin amount",
@@ -203,10 +249,12 @@ export const addCoin = async (req, res) => {
       });
     }
 
+    // Add coins
     user.interviewCoin += coinAmount;
 
     await user.save();
 
+    // Update Redis session
     const sessionId = req.cookies?.session;
 
     if (sessionId) {
@@ -239,9 +287,30 @@ export const addCoin = async (req, res) => {
   }
 };
 
+// ======================================================
+// GET CURRENT USER
+// ======================================================
+
 export const getCurrentUser = async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    user: req.user,
-  });
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user: req.user,
+    });
+  } catch (error) {
+    console.error("Get current user error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
 };
