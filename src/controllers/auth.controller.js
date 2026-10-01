@@ -72,9 +72,7 @@ export const googleAuth = async (req, res) => {
     // Store session cookie
     res.cookie("session", sessionId, {
       httpOnly: true,
-
-      // Local development
-      secure: false,
+      secure: ture,
       sameSite: "lax",
 
       maxAge: SESSION_TTL * 1000,
