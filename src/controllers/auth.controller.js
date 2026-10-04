@@ -72,8 +72,8 @@ export const googleAuth = async (req, res) => {
     // Store session cookie
     res.cookie("session", sessionId, {
       httpOnly: true,
-      secure: ture,
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none ",
 
       maxAge: SESSION_TTL * 1000,
     });
@@ -110,8 +110,8 @@ export const logout = async (req, res) => {
     // Remove browser cookie
     res.clearCookie("session", {
       httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
     });
 
     return res.status(200).json({
